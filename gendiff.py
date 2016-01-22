@@ -4,7 +4,13 @@ import ftplib
 import cStringIO
 import json
 import sys
+import csv
 import os
+from sqlalchemy import Column, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+Base = declarative_base()
+from sqlalchemy import create_engine
 
 class GenDiff(object):
     config_file = "gendiff.json"
@@ -24,7 +30,6 @@ class GenDiff(object):
         print(self.config.genome_ftp_url)
         genome_store = GenomeStore(self.dir_name, self.config)
         genome_store.setup_summary_file()
-        #print("TODO: start webserver")
 
     def _setup_dir(self):
         if not os.path.isdir(self.dir_name):
@@ -84,7 +89,7 @@ class GenomeStore(object):
     def setup_summary_file(self):
         if not os.path.exists(self.summary_file_path()):
             self.download_summary_file()
-        self.create_summary_database()
+        self.setup_summary_database()
 
     def download_summary_file(self):
         print("Downloading summary file.")
@@ -96,8 +101,124 @@ class GenomeStore(object):
         ftp.retrbinary("RETR " + filename ,open(path, 'wb').write)
         ftp.quit()
 
+    def setup_summary_database(self):
+        url = os.path.join('sqlite:///', self.data_dir, 'gendiff.sqlite')
+        engine = create_engine(url, echo=True)
+
+        print("create tables")
+        Base.metadata.create_all(engine)
+        session = sessionmaker(bind=engine)()
+        with open(self.summary_file_path(), 'rb') as csvfile:
+            pos = csvfile.tell()
+            firstline = csvfile.readline()
+            csvfile.seek(pos)
+            if firstline.startswith("# "):
+                csvfile.read(2)
+            csvreader = csv.DictReader(csvfile, delimiter='\t', quotechar='|')
+            row_names = [
+                "assembly_accession",
+                "bioproject",
+                "biosample",
+                "wgs_master",
+                "refseq_category",
+                "taxid",
+                "species_taxid",
+                "organism_name",
+                "infraspecific_name",
+                "isolate",
+                "version_status",
+                "assembly_level",
+                "release_type",
+                "genome_rep",
+                "seq_rel_date",
+                "asm_name",
+                "submitter",
+                "gbrs_paired_asm",
+                "paired_asm_comp",
+                "ftp_path"
+            ]
+            for row in csvreader:
+                genome = Genome()
+                for name in row_names:
+                    val = unicode(row[name], "utf-8")
+                    setattr(genome, name, val)
+                session.add(genome)
+                #print(row['assembly_accession'])
+                """row = [unicode(s, "utf-8") for s in row]
+                if row[0].startswith("#"):
+                    row[0] = row[0].replace("# ","")
+                    for idx,name in enumerate(row):
+                        row_names[name] = idx
+                    import pdb; pdb.set_trace()
+                else:
+                    genome = Genome(
+                        assembly_accession",
+                        bioproject",
+                        biosample",
+                        wgs_master",
+                        refseq_category",
+                        taxid",
+                        species_taxid",
+                        organism_name",
+                        infraspecific_name",
+                        isolate",
+                        version_status",
+                        assembly_level",
+                        release_type",
+                        genome_rep",
+                        seq_rel_date",
+                        asm_name",
+                        submitter",
+                        gbrs_paired_asm",
+                        paired_asm_comp",
+                        ftp_path = row[19])
+                    session.add(genome)
+                    """
+        session.commit()
+''
 class SummaryDB(object):
     pass
+
+#record = SeqIO.parse('GCF_000001765.3_Dpse_3.0_genomic.gbff', "genbank")
+#r = record.next()
+#[f for f in r.features if f.type == 'source']
+#>>> r.features[0].type
+#'source'
+#r.features[0].qualifiers['chromosome']
+
+
+class Genome(Base):
+    __tablename__ = 'genome'
+    assembly_accession = Column(String, primary_key=True)
+    bioproject = Column(String)
+    biosample = Column(String)
+    wgs_master = Column(String)
+    refseq_category = Column(String)
+    taxid = Column(String)
+    species_taxid = Column(String)
+    organism_name = Column(String)
+    infraspecific_name = Column(String)
+    isolate = Column(String)
+    version_status = Column(String)
+    assembly_level = Column(String)
+    release_type = Column(String)
+    genome_rep = Column(String)
+    seq_rel_date = Column(String)
+    asm_name = Column(String)
+    submitter = Column(String)
+    gbrs_paired_asm = Column(String)
+    paired_asm_comp = Column(String)
+    ftp_path = Column(String)
+    #assembly_accession	bioproject	biosample	wgs_master	refseq_category	taxid
+    # species_taxid	organism_name	infraspecific_name	isolate	version_status
+    # assembly_level	release_type	genome_rep	seq_rel_date	asm_name
+    # submitter	gbrs_paired_asm	paired_asm_comp	ftp_path
+    #GCF_000001215.4	PRJNA164	SAMN02803731		reference genome	7227
+    # 7227	Drosophila melanogaster			latest	Chromosome	Major	Full
+    # 2014/08/01	Release 6 plus ISO1 MT	The FlyBase Consortium/Berkeley
+    # Drosophila Genome Project/Celera Genomics	GCA_000001215.4	identical
+    #ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF_000001215.4_Release_6_plus_ISO1_MT
+
 
 def main(args = sys.argv):
     if len(args) != 2:
